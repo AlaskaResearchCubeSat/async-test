@@ -546,6 +546,10 @@ int incCmd(char **argv,unsigned short argc){
   return 0;
 }
 
+int replayCmd(char **argv,unsigned short argc){
+  error_log_replay();
+  return 0;
+}
 
 
 //table of commands with help
@@ -564,5 +568,6 @@ const CMD_SPEC cmd_tbl[]={{"help"," [command]\r\n\t""get a list of commands or h
                          {"exit","\r\n\t""Close async connection.",asyncCmd},
                          {"spam","n\r\n\t""Spam the terminal with n chars",spamCmd},
                          {"inc","n\r\n\t""Spam the by printing numbers from 0 to n-1",incCmd},
+                         {"replay","\r\n\t""Replay errors from log",replayCmd},
                          //end of list
                          {NULL,NULL,NULL}};
