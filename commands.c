@@ -4,9 +4,9 @@
 #include <stdlib.h>
 #include <msp430.h>
 #include <ctl_api.h>
-#include "terminal.h"
-#include "ARCbus.h"
-#include "UCA1_uart.h"
+#include <terminal.h>
+#include <ARCbus.h>
+#include <UCA1_uart.h>
 
 
 //helper function to parse I2C address
@@ -15,8 +15,25 @@ unsigned char getI2C_addr(char *str,short res){
   unsigned long addr;
   unsigned char tmp;
   char *end;
+  //attempt to parse a numeric address
   addr=strtol(str,&end,0);
+  //check for errors
   if(end==str){
+    //check for symbolic matches
+    if(!strcmp(str,"LEDL")){
+      return BUS_ADDR_LEDL;
+    }else if(!strcmp(str,"ACDS")){
+      return BUS_ADDR_ACDS;
+    }else if(!strcmp(str,"COMM")){
+      return BUS_ADDR_COMM;
+    }else if(!strcmp(str,"IMG")){
+      return BUS_ADDR_IMG;
+    }else if(!strcmp(str,"CDH")){
+      return BUS_ADDR_CDH;
+    }else if(!strcmp(str,"GC")){
+      return BUS_ADDR_GC;
+    }
+    //not a known address, error
     printf("Error : could not parse address \"%s\".\r\n",str);
     return 0xFF;
   }
@@ -24,15 +41,18 @@ unsigned char getI2C_addr(char *str,short res){
     printf("Error : unknown sufix \"%s\" at end of address\r\n",end);
     return 0xFF;
   }
+  //check address length
   if(addr>0x7F){
     printf("Error : address 0x%04lX is not 7 bits.\r\n",addr);
     return 0xFF;
   }
+  //check for reserved address
   tmp=0x78&addr;
   if((tmp==0x00 || tmp==0x78) && res){
     printf("Error : address 0x%02lX is reserved.\r\n",addr);
     return 0xFF;
   }
+  //return address
   return addr;
 }
 
@@ -60,10 +80,13 @@ int restCmd(char **argv,unsigned short argc){
     }
     //setup packet 
     BUS_cmd_init(buff,CMD_RESET);
-    resp=BUS_cmd_tx(addr,buff,0,0,SEND_FOREGROUND);
+    resp=BUS_cmd_tx(addr,buff,0,0,BUS_I2C_SEND_FOREGROUND);
     switch(resp){
       case 0:
         puts("Command Sent Sucussfully.\r");
+      break;
+      case ERR_TIMEOUT:
+        puts("IIC timeout Error.\r");
       break;
     }
   }
@@ -149,25 +172,34 @@ const char *stateName(unsigned char state){
       return "CTL_STATE_RUNNABLE";
     case CTL_STATE_TIMER_WAIT:
       return "CTL_STATE_TIMER_WAIT";
+    case CTL_STATE_EVENT_WAIT_ALL|CTL_STATE_TIMER_WAIT:
     case CTL_STATE_EVENT_WAIT_ALL:
       return "CTL_STATE_EVENT_WAIT_ALL";
+    case CTL_STATE_EVENT_WAIT_ALL_AC|CTL_STATE_TIMER_WAIT:
     case CTL_STATE_EVENT_WAIT_ALL_AC:
       return "CTL_STATE_EVENT_WAIT_ALL_AC";
+    case CTL_STATE_EVENT_WAIT_ANY|CTL_STATE_TIMER_WAIT:
     case CTL_STATE_EVENT_WAIT_ANY:
       return "CTL_STATE_EVENT_WAIT_ANY";
+    case CTL_STATE_EVENT_WAIT_ANY_AC|CTL_STATE_TIMER_WAIT:
     case CTL_STATE_EVENT_WAIT_ANY_AC:
       return "CTL_STATE_EVENT_WAIT_ANY_AC";
+    case CTL_STATE_SEMAPHORE_WAIT|CTL_STATE_TIMER_WAIT:
     case CTL_STATE_SEMAPHORE_WAIT:
       return "CTL_STATE_SEMAPHORE_WAIT";
+    case CTL_STATE_MESSAGE_QUEUE_POST_WAIT|CTL_STATE_TIMER_WAIT:
     case CTL_STATE_MESSAGE_QUEUE_POST_WAIT:
       return "CTL_STATE_MESSAGE_QUEUE_POST_WAIT";
+    case CTL_STATE_MESSAGE_QUEUE_RECEIVE_WAIT|CTL_STATE_TIMER_WAIT:
     case CTL_STATE_MESSAGE_QUEUE_RECEIVE_WAIT:
       return "CTL_STATE_MESSAGE_QUEUE_RECEIVE_WAIT";
+    case CTL_STATE_MUTEX_WAIT|CTL_STATE_TIMER_WAIT:
     case CTL_STATE_MUTEX_WAIT:
       return "CTL_STATE_MUTEX_WAIT";
     case CTL_STATE_SUSPENDED:
       return "CTL_STATE_SUSPENDED";
     default:
+      printf("Unknown Stat : 0x%02X\r\n",state);
       return "unknown state";
   }
 }
@@ -178,12 +210,12 @@ int statsCmd(char **argv,unsigned short argc){
   int i;
   CTL_TASK_t *t=ctl_task_list;
   //format string
-  const char *fmt="%-10s\t%u\t\t%c%-28s\t%lu\r\n";
+  const char *fmt="%-10s\t%u\t\t%s%c%-35s\t%lu\r\n";
   //print out nice header
-  printf("\r\nName\t\tPriority\tState\t\t\t\tTime\r\n--------------------------------------------------------------------\r\n");
+  printf("\r\nName\t\tPriority\t   State\t\t\t\tTime\r\n---------------------------------------------------------------------------------\r\n");
   //loop through tasks and print out info
   while(t!=NULL){
-    printf(fmt,t->name,t->priority,(t==ctl_task_executing)?'*':' ',stateName(t->state),t->execution_time);
+    printf(fmt,t->name,t->priority,(t->state&CTL_STATE_TIMER_WAIT)?"tw":"  ",(t==ctl_task_executing)?'*':' ',stateName(t->state),t->execution_time);
     t=t->next;
   }
   //add a blank line after table
@@ -197,9 +229,14 @@ int addrCmd(char **argv,unsigned short argc){
   //unsigned long addr;
   //unsigned char tmp;
   //char *end;
+  int en;
   unsigned char addr;
   if(argc==0){
-    printf("I2C address = 0x%02X\r\n",*(unsigned char*)0x01000);
+    if(*(unsigned char*)0x01000!=((~UCGCEN)&UCB0I2COA)){
+        printf("Flash I2C address = 0x%02X\r\nPeripheral I2C address = 0x%02X\r\n",*(unsigned char*)0x01000,((~UCGCEN)&UCB0I2COA));
+    }else{
+      printf("I2C address = 0x%02X\r\n",*(unsigned char*)0x01000);
+    }
     return 0;
   }
   if(argc>1){
@@ -211,6 +248,7 @@ int addrCmd(char **argv,unsigned short argc){
     return 1;
   }
   //erase address section
+  en=ctl_global_interrupts_set(0);
   //first disable watchdog
   WDT_STOP();
   //unlock flash memory
@@ -227,8 +265,9 @@ int addrCmd(char **argv,unsigned short argc){
   FCTL1=FWKEY;
   //lock flash
   FCTL3=FWKEY|LOCK;
+  ctl_global_interrupts_set(en);
   //Kick WDT to restart it
-  WDT_KICK();
+  //WDT_KICK();
   //print out message
   printf("I2C Address Changed. Changes will not take effect until after reset.\r\n");
   return 0;
@@ -288,7 +327,7 @@ int txCmd(char **argv,unsigned short argc){
     }
   }
   len=i;
-  resp=BUS_cmd_tx(addr,buff,len,nack,SEND_FOREGROUND);
+  resp=BUS_cmd_tx(addr,buff,len,nack,BUS_I2C_SEND_FOREGROUND);
   switch(resp){
     case RET_SUCCESS:
       printf("Command Sent Sucussfully.\r\n");
@@ -308,7 +347,7 @@ int spiCmd(char **argv,unsigned short argc){
   char *end;
   unsigned short crc;
   //static unsigned char rx[2048+2];
-  static unsigned char rx[512+2];
+  unsigned char *rx=NULL;
   int resp,i,len=100;
   if(argc<1){
     printf("Error : too few arguments.\r\n");
@@ -330,10 +369,17 @@ int spiCmd(char **argv,unsigned short argc){
       printf("Error : unknown sufix \"%s\" at end of length \"%s\"\r\n",end,argv[2]);
       return 3;
     }    
-    if(len+2>sizeof(rx)){
-      printf("Error : length is too long.\r\n");
+    if(len+2>BUS_get_buffer_size()){
+      printf("Error : length is too long. Maximum Length is %u\r\n",BUS_get_buffer_size());
       return 4;
     }
+  }
+  //get buffer, set a timeout of 2 secconds
+  rx=BUS_get_buffer(CTL_TIMEOUT_DELAY,2048);
+  //check for error
+  if(rx==NULL){
+    printf("Error : Timeout while waiting for buffer.\r\n");
+    return -1;
   }
   //fill buffer with "random" data
   for(i=0;i<len;i++){
@@ -348,11 +394,8 @@ int spiCmd(char **argv,unsigned short argc){
   while(UCB0STAT&UCBBUSY);
   //TESTING: set pin low
   P8OUT&=~BIT0;
-  switch(resp){
-    case ERR_BADD_ADDR:
-      printf("Error : Bad Address\r\n");
-    break;
-    case RET_SUCCESS:
+  //check return value
+  if(resp==RET_SUCCESS){
       //print out data message
       printf("SPI data recived\r\n");
       //print out data
@@ -361,14 +404,11 @@ int spiCmd(char **argv,unsigned short argc){
         printf("%03i ",rx[i]);
       }
       printf("\r\n");
-    break;
-    case ERR_BAD_CRC:
-      puts("Bad CRC\r");
-    break;
-    default:      
-      printf("Unknown Error %i\r\n",resp);
-    break;
+  }else{
+    printf("%s\r\n",BUS_error_str(resp));
   }
+  //free buffer
+  BUS_free_buffer();
   return 0;
 }
 
@@ -402,7 +442,7 @@ int printCmd(char **argv,unsigned short argc){
   //TESTING: set pin high
   P8OUT|=BIT0;
   //send command
-  BUS_cmd_tx(addr,buff,len,0,SEND_FOREGROUND);
+  BUS_cmd_tx(addr,buff,len,0,BUS_I2C_SEND_FOREGROUND);
   //TESTING: set pin low
   P8OUT&=~BIT0;
   return 0;
@@ -438,29 +478,12 @@ int tstCmd(char **argv,unsigned short argc){
   //TESTING: set pin high
   P8OUT|=BIT0;
   //send command
-  BUS_cmd_tx(addr,buff,len,0,SEND_FOREGROUND);
+  BUS_cmd_tx(addr,buff,len,0,BUS_I2C_SEND_FOREGROUND);
   //TESTING: wait for transaction to fully complete
   while(UCB0STAT&UCBBUSY);
   //TESTING: set pin low
   P8OUT&=~BIT0;
   return 0;
-}
-
-char *i2c_stat2str(unsigned char stat){
-  switch(stat){
-    case I2C_IDLE:
-      return "I2C_IDLE";
-    case I2C_TX:
-      return "I2C_TX";
-    case I2C_RX:
-      return "I2C_RX";
-   /* case I2C_TXRX:
-      return "I2C_TXRX";
-    case I2C_RXTX:
-      return "I2C_RXTX";*/
-    default:
-      return "unknown state";
-  }
 }
 
 //print current time
@@ -469,18 +492,76 @@ int timeCmd(char **argv,unsigned short argc){
   return 0;
 }
 
+int asyncCmd(char **argv,unsigned short argc){
+   char c;
+   int err;
+   CTL_EVENT_SET_t e=0,evt;
+   unsigned char addr;
+   if(argc>0){
+    printf("Error : %s takes no arguments\r\n",argv[0]);
+    return -1;
+  }
+  if(err=async_close()){
+    printf("\r\nError : async_close() failed : %s\r\n",BUS_error_str(err));
+  }
+}
+
+const char spamdat[]="This is a spam test\r\n";
+
+int spamCmd(char **argv,unsigned short argc){
+  unsigned int n,i,j;
+  if(argc<1 || argc==0){
+    printf("Error : %s takes only one argument but %i given\r\n",argv[0],argc);
+    return -1;
+  }
+  n=atoi(argv[1]);
+  for(i=0,j=0;i<n;i++,j++){
+    if(j>=sizeof(spamdat)){
+      j=0;
+    }
+    async_TxChar(spamdat[j]);
+  }
+  //pause to let chars clear
+  ctl_timeout_wait(ctl_get_current_time()+100);
+  //print message
+  printf("\r\nSpaming complete %u chars sent\r\n",n);
+  return 0;
+}
+
+int incCmd(char **argv,unsigned short argc){
+  unsigned int n,i,c;
+  if(argc<1 || argc==0){
+    printf("Error : %s takes only one argument but %i given\r\n",argv[0],argc);
+    return -1;
+  }
+  n=atoi(argv[1]);
+  for(i=0;i<n;i++){
+    c+=printf("%u \r\n",i);
+  }
+  //pause to let chars clear
+  ctl_timeout_wait(ctl_get_current_time()+100);
+  //print message
+  printf("\r\nSpaming complete\r\n%u chars printed\r\n",c);
+  return 0;
+}
+
+
 
 //table of commands with help
-CMD_SPEC cmd_tbl[]={{"help"," [command]\r\n\t""get a list of commands or help on a spesific command.",helpCmd},
-                     {"priority"," task [priority]\r\n\t""Get/set task priority.",priorityCmd},
-                     {"timeslice"," [period]\r\n\t""Get/set ctl_timeslice_period.",timesliceCmd},
-                     {"stats","\r\n\t""Print task status",statsCmd},
-                     {"reset","\r\n\t""reset the msp430.",restCmd},
-                     {"addr"," [addr]\r\n\t""Get/Set I2C address.",addrCmd},
-                     {"tx"," [noACK] [noNACK] addr ID [[data0] [data1]...]\r\n\t""send data over I2C to an address",txCmd},
-                     {"SPI","addr [len]\r\n\t""Send data using SPI.",spiCmd},
-                     {"print"," addr str1 [[str2] ... ]\r\n\t""Send a string to addr.",printCmd},
-                     {"tst"," addr len\r\n\t""Send test data to addr.",tstCmd},
-                     {"time","\r\n\t""Return current time.",timeCmd},
-                     //end of list
-                     {NULL,NULL,NULL}};
+const CMD_SPEC cmd_tbl[]={{"help"," [command]\r\n\t""get a list of commands or help on a spesific command.",helpCmd},
+                         {"priority"," task [priority]\r\n\t""Get/set task priority.",priorityCmd},
+                         {"timeslice"," [period]\r\n\t""Get/set ctl_timeslice_period.",timesliceCmd},
+                         {"stats","\r\n\t""Print task status",statsCmd},
+                         {"reset","\r\n\t""reset the msp430.",restCmd},
+                         {"addr"," [addr]\r\n\t""Get/Set I2C address.",addrCmd},
+                         {"tx"," [noACK] [noNACK] addr ID [[data0] [data1]...]\r\n\t""send data over I2C to an address",txCmd},
+                         {"SPI","addr [len]\r\n\t""Send data using SPI.",spiCmd},
+                         {"print"," addr str1 [[str2] ... ]\r\n\t""Send a string to addr.",printCmd},
+                         {"tst"," addr len\r\n\t""Send test data to addr.",tstCmd},
+                         {"time","\r\n\t""Return current time.",timeCmd},
+                         {"async","\r\n\t""Close async connection.",asyncCmd},
+                         {"exit","\r\n\t""Close async connection.",asyncCmd},
+                         {"spam","n\r\n\t""Spam the terminal with n chars",spamCmd},
+                         {"inc","n\r\n\t""Spam the by printing numbers from 0 to n-1",incCmd},
+                         //end of list
+                         {NULL,NULL,NULL}};

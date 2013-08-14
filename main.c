@@ -4,20 +4,26 @@
 #include <string.h>
 #include <ctype.h>
 #include <ARCbus.h>
-#include "UCA1_uart.h"
+#include <UCA1_uart.h>
 #include "timerA.h"
-#include "terminal.h"
+#include <terminal.h>
 
 CTL_TASK_t tasks[3];
 
 //stacks for tasks
-unsigned stack1[1+256+1];          
-unsigned stack2[1+512+1];
-unsigned stack3[1+64+1];   
+unsigned stack1[1+300+1];          
+unsigned stack2[1+600+1];
+unsigned stack3[1+350+1];   
 
 CTL_EVENT_SET_t cmd_parse_evt;
 
 unsigned char buffer[80];
+
+
+//set printf and friends to send chars out UCA1 uart
+int __putchar(int c){
+  return async_TxChar(c);
+}
 
 //handle subsystem specific commands
 int SUB_parseCmd(unsigned char src,unsigned char cmd,unsigned char *dat,unsigned short len){
@@ -58,13 +64,14 @@ void cmd_parse(void *p) __toplevel{
   }
 }
 
-
 void sub_events(void *p) __toplevel{
   unsigned int e,len;
   int i;
   unsigned char buf[10],*ptr;
+  extern unsigned char async_addr;
+  const TERM_SPEC async_term={"async Test Program",async_Getc};
   for(;;){
-    e=ctl_events_wait(CTL_EVENT_WAIT_ANY_EVENTS_WITH_AUTO_CLEAR,&SUB_events,SUB_EV_ALL,CTL_TIMEOUT_NONE,0);
+    e=ctl_events_wait(CTL_EVENT_WAIT_ANY_EVENTS_WITH_AUTO_CLEAR,&SUB_events,SUB_EV_ALL|SUB_EV_ASYNC_OPEN|SUB_EV_ASYNC_CLOSE,CTL_TIMEOUT_NONE,0);
     if(e&SUB_EV_PWR_OFF){
       //print message
       puts("System Powering Down\r");
@@ -81,7 +88,7 @@ void sub_events(void *p) __toplevel{
       ptr=BUS_cmd_init(buf,20);
       //TODO: fill in telemitry data
       //send command
-      BUS_cmd_tx(BUS_ADDR_CDH,buf,0,0,SEND_FOREGROUND);
+      BUS_cmd_tx(BUS_ADDR_CDH,buf,0,0,BUS_I2C_SEND_FOREGROUND);
     }
     if(e&SUB_EV_TIME_CHECK){
       printf("time ticker = %li\r\n",get_ticker_time());
@@ -96,14 +103,49 @@ void sub_events(void *p) __toplevel{
         printf("%03i ",arcBus_stat.spi_stat.rx[i]);
       }
       printf("\r\n");
+      //free buffer
+      BUS_free_buffer_from_event();
     }
     if(e&SUB_EV_SPI_ERR_CRC){
       puts("SPI bad CRC\r");
     }
+    if(e&SUB_EV_ASYNC_OPEN){
+      //kill off the terminal
+      //ctl_task_remove(&tasks[1]);
+      //setup closed event
+      async_setup_close_event(&SUB_events,SUB_EV_ASYNC_CLOSE);
+      //print message
+      printf("Async Opened from 0x%02X\r\n",async_addr);
+      //setup UART terminal        
+      ctl_task_run(&tasks[1],BUS_PRI_NORMAL,terminal,(void*)&async_term,"terminal",sizeof(stack2)/sizeof(stack2[0])-2,stack2+1,0);
+      //async_close();
+    }
+    if(e&SUB_EV_ASYNC_CLOSE){
+      //kill off async terminal
+      ctl_task_remove(&tasks[1]);
+      //setup UART terminal        
+      //ctl_task_run(&tasks[1],2,terminal,"\rUart Terminal Started\r\n","terminal",sizeof(stack2)/sizeof(stack2[0])-2,stack2+1,0);
+    }
   }
 }
 
+//init mmc card before starting terminal task
+void async_wait_term(void *p) __toplevel{
+  int resp;
+  //wait for async connection to open
+  while(!async_isOpen()){
+    ctl_timeout_wait(ctl_get_current_time()+1024);
+  }
+  /*P7OUT^=0xFF;
+  ctl_timeout_wait(ctl_get_current_time()+500);
+  P7OUT^=0xFF;*/
+  //start terminal
+  terminal(p);
+}
+
 int main(void){
+  unsigned char addr;
+  const TERM_SPEC async_term={"async Test Program",async_Getc};
   //DO this first
   ARC_setup(); 
   
@@ -112,27 +154,28 @@ int main(void){
   //setup mmc interface
   //mmcInit_msp();
  
- 
-  //setup UCA1 UART
-  init_UCA1_UART();
   
   //setup P7 for LED's
   P7OUT=0x00;
   P7DIR=0xFF;
+  
+  P7OUT|=BIT0;
 
   //setup P8 for output
   P8OUT=0x00;
   P8DIR=0xFF;
   P8SEL=0x00;
   
+  //read address
+  addr=*((char*)0x01000);
+  //check if address is valid
+  if(addr&0x7F){
+    //use IMG address as default
+    addr=BUS_ADDR_IMG;
+  }
   //setup bus interface
-  initARCbus(*((char*)0x01000));
-  
-  //print informative initial message
-  printf("\rARC Bus Test Program\r\n");
-
-  //print out I2C address
-  printf("I2C address = 0x%02X\r\n",*(unsigned char*)0x01000);
+  initARCbus(addr);
+  //initARCbus(BUS_ADDR_IMG);
 
   //initialize stacks
   memset(stack1,0xcd,sizeof(stack1));  // write known values into the stack
@@ -145,9 +188,9 @@ int main(void){
   stack3[0]=stack3[sizeof(stack3)/sizeof(stack3[0])-1]=0xfeed; // put marker values at the words before/after the stack
 
   //create tasks
-  ctl_task_run(&tasks[0],1,cmd_parse,NULL,"cmd_parse",sizeof(stack1)/sizeof(stack1[0])-2,stack1+1,0);
-  ctl_task_run(&tasks[1],2,terminal,NULL,"terminal",sizeof(stack2)/sizeof(stack2[0])-2,stack2+1,0);
-  ctl_task_run(&tasks[2],10,sub_events,NULL,"sub_events",sizeof(stack3)/sizeof(stack3[0])-2,stack3+1,0);
+  ctl_task_run(&tasks[0],BUS_PRI_LOW,cmd_parse,NULL,"cmd_parse",sizeof(stack1)/sizeof(stack1[0])-2,stack1+1,0);
+ // ctl_task_run(&tasks[1],2,async_wait_term,(void*)&async_term,"terminal",sizeof(stack2)/sizeof(stack2[0])-2,stack2+1,0);
+  ctl_task_run(&tasks[2],BUS_PRI_HIGH,sub_events,NULL,"sub_events",sizeof(stack3)/sizeof(stack3[0])-2,stack3+1,0);
   
   mainLoop();
 }
