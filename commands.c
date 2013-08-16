@@ -551,6 +551,24 @@ int replayCmd(char **argv,unsigned short argc){
   return 0;
 }
 
+//print the status of each tasks stack
+int stackCmd(char **argv,unsigned short argc){
+  extern CTL_TASK_t *ctl_task_list;
+  int i;
+  CTL_TASK_t *t=ctl_task_list;
+  //format string
+  const char *fmt="%-10s\t%lp\t%lp\t%li\r\n";
+  //print out nice header
+  printf("\r\nName\tPointer\tStart\tRemaining\r\n--------------------------------------------------------------------\r\n");
+  //loop through tasks and print out info
+  while(t!=NULL){
+    printf(fmt,t->name,t->stack_pointer,t->stack_start,t->stack_pointer-t->stack_start);
+    t=t->next;
+  }
+  //add a blank line after table
+  printf("\r\n");
+  return 0;
+}
 
 //table of commands with help
 const CMD_SPEC cmd_tbl[]={{"help"," [command]\r\n\t""get a list of commands or help on a spesific command.",helpCmd},
@@ -569,5 +587,6 @@ const CMD_SPEC cmd_tbl[]={{"help"," [command]\r\n\t""get a list of commands or h
                          {"spam","n\r\n\t""Spam the terminal with n chars",spamCmd},
                          {"inc","n\r\n\t""Spam the by printing numbers from 0 to n-1",incCmd},
                          {"replay","\r\n\t""Replay errors from log",replayCmd},
+                         {"stack","\r\n\t""Print task stack status",stackCmd},
                          //end of list
                          {NULL,NULL,NULL}};
