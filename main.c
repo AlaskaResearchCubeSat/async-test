@@ -5,6 +5,7 @@
 #include <ctype.h>
 #include <ARCbus.h>
 #include <UCA1_uart.h>
+#include <SDlib.h>
 #include "timerA.h"
 #include <terminal.h>
 
@@ -152,7 +153,7 @@ int main(void){
   //setup system specific peripherals
 
   //setup mmc interface
-  //mmcInit_msp();
+  mmcInit_msp();
  
   
   //setup P7 for LED's
