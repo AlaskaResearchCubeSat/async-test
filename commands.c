@@ -8,221 +8,8 @@
 #include <ARCbus.h>
 #include <UCA1_uart.h>
 #include <Error.h>
+#include <commandLib.h>
 #include "Proxy_errors.h"
-
-//helper function to parse I2C address
-//if res is true reject reserved addresses
-unsigned char getI2C_addr(char *str,short res){
-  unsigned long addr;
-  unsigned char tmp;
-  char *end;
-  //attempt to parse a numeric address
-  addr=strtol(str,&end,0);
-  //check for errors
-  if(end==str){
-    //check for symbolic matches
-    if(!strcmp(str,"LEDL")){
-      return BUS_ADDR_LEDL;
-    }else if(!strcmp(str,"ACDS")){
-      return BUS_ADDR_ACDS;
-    }else if(!strcmp(str,"COMM")){
-      return BUS_ADDR_COMM;
-    }else if(!strcmp(str,"IMG")){
-      return BUS_ADDR_IMG;
-    }else if(!strcmp(str,"CDH")){
-      return BUS_ADDR_CDH;
-    }else if(!strcmp(str,"GC")){
-      return BUS_ADDR_GC;
-    }
-    //not a known address, error
-    printf("Error : could not parse address \"%s\".\r\n",str);
-    return 0xFF;
-  }
-  if(*end!=0){
-    printf("Error : unknown sufix \"%s\" at end of address\r\n",end);
-    return 0xFF;
-  }
-  //check address length
-  if(addr>0x7F){
-    printf("Error : address 0x%04lX is not 7 bits.\r\n",addr);
-    return 0xFF;
-  }
-  //check for reserved address
-  tmp=0x78&addr;
-  if((tmp==0x00 || tmp==0x78) && res){
-    printf("Error : address 0x%02lX is reserved.\r\n",addr);
-    return 0xFF;
-  }
-  //return address
-  return addr;
-}
-
-//reset a MSP430 on command
-int restCmd(char **argv,unsigned short argc){
-  unsigned char buff[10];
-  unsigned char addr;
-  unsigned short all=0;
-  int resp;
-  //force user to pass no arguments to prevent unwanted resets
-  if(argc>1){
-    puts("Error : too many arguments\r");
-    return -1;
-  }
-  if(argc!=0){
-    if(!strcmp(argv[1],"all")){
-      all=1;
-      addr=BUS_ADDR_GC;
-    }else{
-      //get address
-      addr=getI2C_addr(argv[1],0);
-      if(addr==0xFF){
-        return 1;
-      }
-    }
-    //setup packet 
-    BUS_cmd_init(buff,CMD_RESET);
-    resp=BUS_cmd_tx(addr,buff,0,0,BUS_I2C_SEND_FOREGROUND);
-    switch(resp){
-      case 0:
-        puts("Command Sent Sucussfully.\r");
-      break;
-      case ERR_TIMEOUT:
-        puts("IIC timeout Error.\r");
-      break;
-    }
-  }
-  //reset if no arguments given or to reset all boards
-  if(argc==0 || all){
-    //wait for UART buffer to empty
-    while(UCA1_CheckBusy());
-    //write to WDTCTL without password causes PUC
-    reset(ERR_LEV_INFO,PROXY_ERR_SRC_CMD,CMD_ERR_RESET,0);
-    //Never reached due to reset
-    puts("Error : Reset Failed!\r");
-  }
-  return 0;
-}
-
-//set priority for tasks on the fly
-int priorityCmd(char **argv,unsigned short argc){
-  extern CTL_TASK_t *ctl_task_list;
-  int i,found=0;
-  CTL_TASK_t *t=ctl_task_list;
-  if(argc<1 || argc>2){
-    printf("Error: %s takes one or two arguments, but %u are given.\r\n",argv[0],argc);
-    return -1;
-  }
-  while(t!=NULL){
-    if(!strcmp(t->name,argv[1])){
-      found=1;
-      //match found, break
-      break;
-    }
-    t=t->next;
-  }
-  //check that a task was found
-  if(found==0){
-      //no task found, return
-      printf("Error: could not find task named %s.\r\n",argv[1]);
-      return -3;
-  }
-  //print original priority
-  printf("\"%s\" priority = %u\r\n",t->name,t->priority);
-  if(argc==2){
-      unsigned char val=atoi(argv[2]);
-      if(val==0){
-        printf("Error: invalid priority.\r\n");
-        return -2;
-      }
-      //set priority
-      ctl_task_set_priority(t,val);
-      //print original priority
-      printf("new \"%s\" priority = %u\r\n",t->name,t->priority);
-  }
-  return 0;
-}
-
-//get/set ctl_timeslice_period
-int timesliceCmd(char **argv,unsigned short argc){
-  if(argc>1){
-    printf("Error: too many arguments.\r\n");
-    return 0;
-  }
-  //if one argument given then set otherwise get
-  if(argc==1){
-    int en;
-    CTL_TIME_t val=atol(argv[1]);
-    //check value
-    if(val==0){
-      printf("Error: bad value.\r\n");
-      return -1;
-    }
-    //disable interrupts so that opperation is atomic
-    en=ctl_global_interrupts_set(0);
-    ctl_timeslice_period=val;
-    ctl_global_interrupts_set(en);
-  }
-  printf("ctl_timeslice_period = %ul\r\n",ctl_timeslice_period);
-  return 0;
-}
-
-//return state name
-const char *stateName(unsigned char state){
-  switch(state){
-    case CTL_STATE_RUNNABLE:
-      return "CTL_STATE_RUNNABLE";
-    case CTL_STATE_TIMER_WAIT:
-      return "CTL_STATE_TIMER_WAIT";
-    case CTL_STATE_EVENT_WAIT_ALL|CTL_STATE_TIMER_WAIT:
-    case CTL_STATE_EVENT_WAIT_ALL:
-      return "CTL_STATE_EVENT_WAIT_ALL";
-    case CTL_STATE_EVENT_WAIT_ALL_AC|CTL_STATE_TIMER_WAIT:
-    case CTL_STATE_EVENT_WAIT_ALL_AC:
-      return "CTL_STATE_EVENT_WAIT_ALL_AC";
-    case CTL_STATE_EVENT_WAIT_ANY|CTL_STATE_TIMER_WAIT:
-    case CTL_STATE_EVENT_WAIT_ANY:
-      return "CTL_STATE_EVENT_WAIT_ANY";
-    case CTL_STATE_EVENT_WAIT_ANY_AC|CTL_STATE_TIMER_WAIT:
-    case CTL_STATE_EVENT_WAIT_ANY_AC:
-      return "CTL_STATE_EVENT_WAIT_ANY_AC";
-    case CTL_STATE_SEMAPHORE_WAIT|CTL_STATE_TIMER_WAIT:
-    case CTL_STATE_SEMAPHORE_WAIT:
-      return "CTL_STATE_SEMAPHORE_WAIT";
-    case CTL_STATE_MESSAGE_QUEUE_POST_WAIT|CTL_STATE_TIMER_WAIT:
-    case CTL_STATE_MESSAGE_QUEUE_POST_WAIT:
-      return "CTL_STATE_MESSAGE_QUEUE_POST_WAIT";
-    case CTL_STATE_MESSAGE_QUEUE_RECEIVE_WAIT|CTL_STATE_TIMER_WAIT:
-    case CTL_STATE_MESSAGE_QUEUE_RECEIVE_WAIT:
-      return "CTL_STATE_MESSAGE_QUEUE_RECEIVE_WAIT";
-    case CTL_STATE_MUTEX_WAIT|CTL_STATE_TIMER_WAIT:
-    case CTL_STATE_MUTEX_WAIT:
-      return "CTL_STATE_MUTEX_WAIT";
-    case CTL_STATE_SUSPENDED:
-      return "CTL_STATE_SUSPENDED";
-    default:
-      printf("Unknown Stat : 0x%02X\r\n",state);
-      return "unknown state";
-  }
-}
-
-//print the status of all tasks in a table
-int statsCmd(char **argv,unsigned short argc){
-  extern CTL_TASK_t *ctl_task_list;
-  int i;
-  CTL_TASK_t *t=ctl_task_list;
-  //format string
-  const char *fmt="%-10s\t%u\t\t%s%c%-35s\t%lu\r\n";
-  //print out nice header
-  printf("\r\nName\t\tPriority\t   State\t\t\t\tTime\r\n---------------------------------------------------------------------------------\r\n");
-  //loop through tasks and print out info
-  while(t!=NULL){
-    printf(fmt,t->name,t->priority,(t->state&CTL_STATE_TIMER_WAIT)?"tw":"  ",(t==ctl_task_executing)?'*':' ',stateName(t->state),t->execution_time);
-    t=t->next;
-  }
-  //add a blank line after table
-  printf("\r\n");
-  return 0;
-}
 
 
 //change the stored I2C address. this does not change the address for the I2C peripheral
@@ -244,7 +31,7 @@ int addrCmd(char **argv,unsigned short argc){
     printf("Error : too many arguments\r\n");
     return 1;
   }
-  addr=getI2C_addr(argv[1],1);
+  addr=getI2C_addr(argv[1],1,busAddrSym);
   if(addr==0xFF){
     return 1;
   }
@@ -299,7 +86,7 @@ int txCmd(char **argv,unsigned short argc){
     return 2;
   }
   //get address
-  addr=getI2C_addr(argv[1],0);
+  addr=getI2C_addr(argv[1],0,busAddrSym);
   if(addr==0xFF){
     return 1;
   }
@@ -355,7 +142,7 @@ int spiCmd(char **argv,unsigned short argc){
     return 3;
   }
   //get address
-  addr=getI2C_addr(argv[1],0);
+  addr=getI2C_addr(argv[1],0,busAddrSym);
   if(addr==0xFF){
     return 1;
   }
@@ -424,7 +211,7 @@ int printCmd(char **argv,unsigned short argc){
     return 1;
   }
   //get address
-  addr=getI2C_addr(argv[1],0);
+  addr=getI2C_addr(argv[1],0,busAddrSym);
   if(addr==0xFF){
     return 1;
   }
@@ -464,7 +251,7 @@ int tstCmd(char **argv,unsigned short argc){
     return 1;
   }
   //get address
-  addr=getI2C_addr(argv[1],0);
+  addr=getI2C_addr(argv[1],0,busAddrSym);
   len = atoi(argv[2]);
   /*if(len<0){
     printf("Error : bad length");
@@ -572,21 +359,13 @@ int stackCmd(char **argv,unsigned short argc){
 
 //table of commands with help
 const CMD_SPEC cmd_tbl[]={{"help"," [command]\r\n\t""get a list of commands or help on a spesific command.",helpCmd},
-                         {"priority"," task [priority]\r\n\t""Get/set task priority.",priorityCmd},
-                         {"timeslice"," [period]\r\n\t""Get/set ctl_timeslice_period.",timesliceCmd},
-                         {"stats","\r\n\t""Print task status",statsCmd},
-                         {"reset","\r\n\t""reset the msp430.",restCmd},
+                         CTL_COMMANDS,ARC_COMMANDS,ERROR_COMMANDS,
                          {"addr"," [addr]\r\n\t""Get/Set I2C address.",addrCmd},
-                         {"tx"," [noACK] [noNACK] addr ID [[data0] [data1]...]\r\n\t""send data over I2C to an address",txCmd},
-                         {"SPI","addr [len]\r\n\t""Send data using SPI.",spiCmd},
                          {"print"," addr str1 [[str2] ... ]\r\n\t""Send a string to addr.",printCmd},
                          {"tst"," addr len\r\n\t""Send test data to addr.",tstCmd},
-                         {"time","\r\n\t""Return current time.",timeCmd},
                          {"async","\r\n\t""Close async connection.",asyncCmd},
                          {"exit","\r\n\t""Close async connection.",asyncCmd},
                          {"spam","n\r\n\t""Spam the terminal with n chars",spamCmd},
                          {"inc","n\r\n\t""Spam the by printing numbers from 0 to n-1",incCmd},
-                         {"replay","\r\n\t""Replay errors from log",replayCmd},
-                         {"stack","\r\n\t""Print task stack status",stackCmd},
                          //end of list
                          {NULL,NULL,NULL}};
