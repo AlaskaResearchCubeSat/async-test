@@ -18,12 +18,28 @@ int addrCmd(char **argv,unsigned short argc){
   //unsigned char tmp;
   //char *end;
   int en;
-  unsigned char addr;
+  unsigned char addr,addr_f,addr_p;
+  const char *name;
   if(argc==0){
-    if(*(unsigned char*)0x01000!=((~UCGCEN)&UCB0I2COA)){
-        printf("Flash I2C address = 0x%02X\r\nPeripheral I2C address = 0x%02X\r\n",*(unsigned char*)0x01000,((~UCGCEN)&UCB0I2COA));
+    addr_f=*(unsigned char*)0x01000;
+    addr_p=((~UCGCEN)&UCB0I2COA);
+    if(addr_f!=addr_p){
+      if((name=I2C_addr_revlookup(addr_f,busAddrSym))!=NULL){
+        printf("Flash I2C address = 0x%02X (%s)\r\n",addr_f,name);
+      }else{
+        printf("Flash I2C address = 0x%02X\r\n",addr_f);
+      }
+      if((name=I2C_addr_revlookup(addr_p,busAddrSym))!=NULL){
+        printf("Peripheral I2C address = 0x%02X (%s)\r\n",addr_p,name);
+      }else{
+        printf("Peripheral I2C address = 0x%02X\r\n",addr_p);
+      }
     }else{
-      printf("I2C address = 0x%02X\r\n",*(unsigned char*)0x01000);
+      if((name=I2C_addr_revlookup(addr_f,busAddrSym))!=NULL){
+        printf("I2C address = 0x%02X (%s)\r\n",addr_f,name);
+      }else{
+        printf("I2C address = 0x%02X\r\n",addr_f);
+      }
     }
     return 0;
   }
