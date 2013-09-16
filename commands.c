@@ -61,145 +61,6 @@ int addrCmd(char **argv,unsigned short argc){
   return 0;
 }
 
-//transmit command over I2C
-int txCmd(char **argv,unsigned short argc){
-  unsigned char buff[10],*ptr,id;
-  unsigned char addr;
-  unsigned short len;
-  unsigned int e;
-  char *end;
-  int i,resp,nack=BUS_CMD_FL_NACK;
-  if(!strcmp(argv[1],"noNACK")){
-    nack=0;
-    //shift arguments
-    argv[1]=argv[0];
-    argv++;
-    argc--;
-  }
-  //check number of arguments
-  if(argc<2){
-    printf("Error : too few arguments.\r\n");
-    return 1;
-  }
-  if(argc>sizeof(buff)){
-    printf("Error : too many arguments.\r\n");
-    return 2;
-  }
-  //get address
-  addr=getI2C_addr(argv[1],0,busAddrSym);
-  if(addr==0xFF){
-    return 1;
-  }
-  //get packet ID
-  id=strtol(argv[2],&end,0);
-  if(end==argv[2]){
-      printf("Error : could not parse element \"%s\".\r\n",argv[2]);
-      return 2;
-  }
-  if(*end!=0){
-    printf("Error : unknown sufix \"%s\" at end of element \"%s\"\r\n",end,argv[2]);
-    return 3;
-  }
-  //setup packet 
-  ptr=BUS_cmd_init(buff,id);
-  //pares arguments
-  for(i=0;i<argc-2;i++){
-    ptr[i]=strtol(argv[i+3],&end,0);
-    if(end==argv[i+1]){
-        printf("Error : could not parse element \"%s\".\r\n",argv[i+3]);
-        return 2;
-    }
-    if(*end!=0){
-      printf("Error : unknown sufix \"%s\" at end of element \"%s\"\r\n",end,argv[i+3]);
-      return 3;
-    }
-  }
-  len=i;
-  resp=BUS_cmd_tx(addr,buff,len,nack,BUS_I2C_SEND_FOREGROUND);
-  switch(resp){
-    case RET_SUCCESS:
-      printf("Command Sent Sucussfully.\r\n");
-    break;
-  }
-  //check if an error occured
-  if(resp<0){
-    printf("Error : unable to send command\r\n");
-  }
-  printf("Resp = %i\r\n",resp);
-  return 0;
-}
-
-//Send data over SPI
-int spiCmd(char **argv,unsigned short argc){
-  unsigned char addr;
-  char *end;
-  unsigned short crc;
-  //static unsigned char rx[2048+2];
-  unsigned char *rx=NULL;
-  int resp,i,len=100;
-  if(argc<1){
-    printf("Error : too few arguments.\r\n");
-    return 3;
-  }
-  //get address
-  addr=getI2C_addr(argv[1],0,busAddrSym);
-  if(addr==0xFF){
-    return 1;
-  }
-  if(argc>=2){
-    //Get packet length
-    len=strtol(argv[2],&end,0);
-    if(end==argv[2]){
-        printf("Error : could not parse length \"%s\".\r\n",argv[2]);
-        return 2;
-    }
-    if(*end!=0){
-      printf("Error : unknown sufix \"%s\" at end of length \"%s\"\r\n",end,argv[2]);
-      return 3;
-    }    
-    if(len+2>BUS_get_buffer_size()){
-      printf("Error : length is too long. Maximum Length is %u\r\n",BUS_get_buffer_size());
-      return 4;
-    }
-  }
-  //get buffer, set a timeout of 2 secconds
-  rx=BUS_get_buffer(CTL_TIMEOUT_DELAY,2048);
-  //check for error
-  if(rx==NULL){
-    printf("Error : Timeout while waiting for buffer.\r\n");
-    return -1;
-  }
-  //fill buffer with "random" data
-  for(i=0;i<len;i++){
-    rx[i]=i;
-  }
-  //send data
-  //TESTING: set pin high
-  P8OUT|=BIT0;
-  //send SPI data
-  resp=BUS_SPI_txrx(addr,rx,rx,len);
-  //TESTING: wait for transaction to fully complete
-  while(UCB0STAT&UCBBUSY);
-  //TESTING: set pin low
-  P8OUT&=~BIT0;
-  //check return value
-  if(resp==RET_SUCCESS){
-      //print out data message
-      printf("SPI data recived\r\n");
-      //print out data
-      for(i=0;i<len;i++){
-        //printf("0x%02X ",rx[i]);
-        printf("%03i ",rx[i]);
-      }
-      printf("\r\n");
-  }else{
-    printf("%s\r\n",BUS_error_str(resp));
-  }
-  //free buffer
-  BUS_free_buffer();
-  return 0;
-}
-
 int printCmd(char **argv,unsigned short argc){
   unsigned char buff[40],*ptr,id;
   unsigned char addr;
@@ -274,12 +135,6 @@ int tstCmd(char **argv,unsigned short argc){
   return 0;
 }
 
-//print current time
-int timeCmd(char **argv,unsigned short argc){
-  printf("time ticker = %li\r\n",get_ticker_time());
-  return 0;
-}
-
 int asyncCmd(char **argv,unsigned short argc){
    char c;
    int err;
@@ -335,25 +190,6 @@ int incCmd(char **argv,unsigned short argc){
 
 int replayCmd(char **argv,unsigned short argc){
   error_log_replay();
-  return 0;
-}
-
-//print the status of each tasks stack
-int stackCmd(char **argv,unsigned short argc){
-  extern CTL_TASK_t *ctl_task_list;
-  int i;
-  CTL_TASK_t *t=ctl_task_list;
-  //format string
-  const char *fmt="%-10s\t%lp\t%lp\t%li\r\n";
-  //print out nice header
-  printf("\r\nName\tPointer\tStart\tRemaining\r\n--------------------------------------------------------------------\r\n");
-  //loop through tasks and print out info
-  while(t!=NULL){
-    printf(fmt,t->name,t->stack_pointer,t->stack_start,t->stack_pointer-t->stack_start);
-    t=t->next;
-  }
-  //add a blank line after table
-  printf("\r\n");
   return 0;
 }
 
