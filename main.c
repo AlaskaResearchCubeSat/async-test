@@ -168,15 +168,14 @@ int main(void){
   P8SEL=0x00;
   
   //read address
-  addr=*((char*)0x01000);
+  addr=*((unsigned char*)0x01000);
   //check if address is valid
-  if(addr&0x7F){
-    //use IMG address as default
-    addr=BUS_ADDR_IMG;
+  if(addr&0x80){
+    //use 0x10 as default (not a subsystem address)
+    addr=0x10;
   }
   //setup bus interface
   initARCbus(addr);
-  //initARCbus(BUS_ADDR_IMG);
 
   //initialize stacks
   memset(stack1,0xcd,sizeof(stack1));  // write known values into the stack
