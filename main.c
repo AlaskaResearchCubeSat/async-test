@@ -26,6 +26,10 @@ int __putchar(int c){
   return async_TxChar(c);
 }
 
+int __getchar(void){
+    return async_Getc();
+}
+
 //handle subsystem specific commands
 int SUB_parseCmd(unsigned char src,unsigned char cmd,unsigned char *dat,unsigned short len){
   int i;
@@ -70,7 +74,6 @@ void sub_events(void *p) __toplevel{
   int i;
   unsigned char buf[10],*ptr;
   extern unsigned char async_addr;
-  const TERM_SPEC async_term={"async Test Program",async_Getc};
   for(;;){
     e=ctl_events_wait(CTL_EVENT_WAIT_ANY_EVENTS_WITH_AUTO_CLEAR,&SUB_events,SUB_EV_ALL|SUB_EV_ASYNC_OPEN|SUB_EV_ASYNC_CLOSE,CTL_TIMEOUT_NONE,0);
     if(e&SUB_EV_PWR_OFF){
@@ -91,9 +94,10 @@ void sub_events(void *p) __toplevel{
       //send command
       BUS_cmd_tx(BUS_ADDR_CDH,buf,0,0,BUS_I2C_SEND_FOREGROUND);
     }
-    if(e&SUB_EV_TIME_CHECK){
+    // Note: Jasper commented this out because the code wasn't working.
+    /*if(e&SUB_EV_TIME_CHECK){
       printf("time ticker = %li\r\n",get_ticker_time());
-    }
+    }*/
     if(e&SUB_EV_SPI_DAT){
       puts("SPI data recived:\r");
       //get length
@@ -118,7 +122,7 @@ void sub_events(void *p) __toplevel{
       //print message
       printf("Async Opened from 0x%02X\r\n",async_addr);
       //setup UART terminal        
-      ctl_task_run(&tasks[1],BUS_PRI_NORMAL,terminal,(void*)&async_term,"terminal",sizeof(stack2)/sizeof(stack2[0])-2,stack2+1,0);
+      ctl_task_run(&tasks[1],BUS_PRI_NORMAL,terminal,"async Test Program","terminal",sizeof(stack2)/sizeof(stack2[0])-2,stack2+1,0);
       //async_close();
     }
     if(e&SUB_EV_ASYNC_CLOSE){
@@ -146,7 +150,6 @@ void async_wait_term(void *p) __toplevel{
 
 int main(void){
   unsigned char addr;
-  const TERM_SPEC async_term={"async Test Program",async_Getc};
   //DO this first
   ARC_setup(); 
   

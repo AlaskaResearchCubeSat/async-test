@@ -204,14 +204,9 @@ int incCmd(char **argv,unsigned short argc){
   return 0;
 }
 
-int replayCmd(char **argv,unsigned short argc){
-  error_log_replay();
-  return 0;
-}
-
 //table of commands with help
 const CMD_SPEC cmd_tbl[]={{"help"," [command]\r\n\t""get a list of commands or help on a spesific command.",helpCmd},
-                         CTL_COMMANDS,ARC_COMMANDS,ERROR_COMMANDS,
+                         CTL_COMMANDS,ARC_COMMANDS,ERROR_COMMANDS,MMC_COMMANDS,
                          {"addr"," [addr]\r\n\t""Get/Set I2C address.",addrCmd},
                          {"print"," addr str1 [[str2] ... ]\r\n\t""Send a string to addr.",printCmd},
                          {"tst"," addr len\r\n\t""Send test data to addr.",tstCmd},
